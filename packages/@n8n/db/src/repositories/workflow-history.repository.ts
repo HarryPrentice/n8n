@@ -1,11 +1,17 @@
 import { Service } from '@n8n/di';
 import { DataSource, LessThan, Repository } from '@n8n/typeorm';
+import { DateUtils } from '@n8n/typeorm/util/DateUtils';
+import { GroupedWorkflowHistory } from 'n8n-workflow';
 
 import { WorkflowHistory, WorkflowEntity } from '../entities';
+import { WorkflowPublishHistoryRepository } from './workflow-publish-history.repository';
 
 @Service()
 export class WorkflowHistoryRepository extends Repository<WorkflowHistory> {
-	constructor(dataSource: DataSource) {
+	constructor(
+		dataSource: DataSource,
+		private readonly workflowPublishHistoryRepository: WorkflowPublishHistoryRepository,
+	) {
 		super(WorkflowHistory, dataSource.manager);
 	}
 
@@ -40,5 +46,55 @@ export class WorkflowHistoryRepository extends Repository<WorkflowHistory> {
 			.andWhere(`versionId NOT IN (${currentVersionIdsSubquery})`)
 			.andWhere(`versionId NOT IN (${activeVersionIdsSubquery})`)
 			.execute();
+	}
+
+	private minimumCompactAgeHours = 24;
+	private compactingTimeRangeDays = 8;
+
+	makeSkipActiveAndNamedVersionsRule(activeVersions: string[]) {
+		return (
+			_prev: GroupedWorkflowHistory<WorkflowHistory>,
+			next: GroupedWorkflowHistory<WorkflowHistory>,
+			// diff: WorkflowDiff<WorkflowHistory['nodes']>,
+		) => next.to.name || next.to.description || activeVersions.includes(next.to.versionId);
+	}
+
+	async pruneHistory() {
+		// const { pruneDataMaxAge, pruneDataMaxCount } = this.globalConfig.executions;
+
+		//
+
+		// Find ids of all executions that were stopped longer that pruneDataMaxAge ago
+		const endDate = new Date();
+		endDate.setHours(endDate.getHours() - this.minimumCompactAgeHours);
+
+		const startDate = new Date();
+		startDate.setHours(endDate.getHours() - this.minimumCompactAgeHours);
+		startDate.setDate(startDate.getDate() - this.compactingTimeRangeDays);
+
+		// 1. Get workflows with recent changes
+
+		const workflowsById = await this.manager
+			.createQueryBuilder(WorkflowHistory, 'wh')
+			.where('wh.createdAt <= :endDate', {
+				endDate: DateUtils.mixedDateToUtcDatetimeString(endDate),
+			})
+			.andWhere('wh.createdAt >= :startDate', {
+				startDate: DateUtils.mixedDateToUtcDatetimeString(startDate),
+			})
+			.orderBy('wh.createdAt', 'ASC')
+			.groupBy('wh.workflowId')
+			.getRawMany<never>();
+
+		for (const workflows of workflowsById) {
+			// const publishedVersions = await this.workflowPublishHistoryRepository.getPublishedVersions(
+			// 	workflows.workflowId,
+			// );
+			// const grouped = groupWorkflows(
+			// 	workflows,
+			// 	[RULES.mergeAdditiveChanges],
+			// 	[this.makeSkipActiveAndNamedVersionsRule(publishedVersions.map((x) => x.versionId))],
+			// );
+		}
 	}
 }

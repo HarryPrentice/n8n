@@ -184,7 +184,7 @@ export const RULES = {
 	mergeAdditiveChanges,
 };
 
-type GroupedWorkflowHistory<W extends DiffableWorkflow<DiffableNode>> = {
+export type GroupedWorkflowHistory<W extends DiffableWorkflow<DiffableNode>> = {
 	workflowChangeSet: WorkflowChangeSet<W['nodes'][number]>;
 	groupedWorkflows: W[];
 	from: W;
@@ -217,6 +217,7 @@ export type DiffRule<
 export function groupWorkflows<W extends IWorkflowBase = IWorkflowBase>(
 	workflows: W[],
 	rules: Array<DiffRule<W>>,
+	skipRules: Array<DiffRule<W>>,
 ): Array<GroupedWorkflowHistory<W>> {
 	if (workflows.length === 0) return [];
 	if (workflows.length === 1) {
@@ -239,8 +240,11 @@ export function groupWorkflows<W extends IWorkflowBase = IWorkflowBase>(
 	do {
 		prevDiffsLength = diffs.length;
 		const n = diffs.length;
-		for (let i = n - 1; i > 0; --i) {
+		diffLoop: for (let i = n - 1; i > 0; --i) {
 			const diff = compareWorkflowsNodes(diffs[i - 1].from.nodes, diffs[i].to.nodes);
+			for (const shouldSkip of skipRules) {
+				if (shouldSkip(diffs[i - 1], diffs[i], diff)) continue diffLoop;
+			}
 			for (const rule of rules) {
 				const shouldMerge = rule(diffs[i - 1], diffs[i], diff);
 				if (shouldMerge) {
